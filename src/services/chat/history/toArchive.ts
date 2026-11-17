@@ -165,14 +165,9 @@ const assistantFragments = (message: AssistantMessage): Fragment[] => {
       response = undefined
     }
   }
-  // 错误、拒绝提示作为模板保存，导入后仍不进上下文。
+  // 错误提示作为模板保存，导入后仍不进上下文。
   // 正常空回复不补造提示。
-  // 已有的模板直接沿用，避免反复导入导出时重复追加提示。
-  const hasTemplate = blocks.some((block) => block.type === 'text' && block.isTemplate)
-  if (
-    (message.status === 'error' && message.error) ||
-    (!hasTemplate && message.stopReason === 'refusal')
-  ) {
+  if (message.status === 'error' && message.error) {
     const notice = describeReply(message)
     if (notice) {
       fragments.push({ type: 'TEMPLATE_RESPONSE', content: notice.text })
@@ -182,9 +177,6 @@ const assistantFragments = (message: AssistantMessage): Fragment[] => {
 }
 
 const replyStatus = ({ status, stopReason }: AssistantMessage): ChatMessageStatus => {
-  if (stopReason === 'refusal') {
-    return 'CONTENT_FILTER'
-  }
   switch (status) {
     case 'done':
       return stopReason === 'max_tokens' ? 'INCOMPLETE' : 'FINISHED'

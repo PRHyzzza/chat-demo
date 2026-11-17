@@ -128,7 +128,6 @@ export const applyEvent = (
       return {
         ...next,
         stopReason: event.delta.stop_reason,
-        stopDetails: event.delta.stop_details,
         usage: event.usage ?? next.usage,
       }
     default:
@@ -136,10 +135,7 @@ export const applyEvent = (
   }
 }
 
-/**
- * 回复结束：未结束的思考块以当前时间收尾。
- * 安全拒绝（stop_reason: refusal）时已下发的思考与正文不能撤回，按协议要求由客户端丢弃，只保留工具块。
- */
+/** 回复结束：未结束的思考块以当前时间收尾，已流出的内容原样保留。 */
 export const settleReply = (
   reply: AssistantMessage,
   status: Extract<ReplyStatus, 'done' | 'stopped' | 'error'>,
@@ -149,14 +145,12 @@ export const settleReply = (
   ...reply,
   status,
   error,
-  blocks: reply.blocks.flatMap((block): ReplyBlock[] => {
-    if (reply.stopReason === 'refusal' && (block.type === 'thinking' || block.type === 'text')) {
-      return []
-    }
-    return block.type === 'thinking' && block.startedAt !== undefined && block.endedAt === undefined
-      ? [{ ...block, endedAt: now }]
-      : [block]
-  }),
+  blocks: reply.blocks.map(
+    (block): ReplyBlock =>
+      block.type === 'thinking' && block.startedAt !== undefined && block.endedAt === undefined
+        ? { ...block, endedAt: now }
+        : block
+  ),
 })
 
 /** 回复里所有文本块拼起来，用于复制与判断是否有回答 */
@@ -165,14 +159,13 @@ export const getReplyText = (reply: AssistantMessage) =>
 
 /**
  * 只有正常达到输出上限或被停止的回复可续写，报错回复不能续写。
- * 末条限制由调用方判断，拒绝和客户端工具调用不能续写。
+ * 末条限制由调用方判断，客户端工具调用不能续写。
  * 本轮含服务端工具调用或结果（含 READ_LINK 和孤立结果块）的回复不能续写。
  * 服务端模板提示不能作为续写前缀。
  */
 export const canContinueReply = (reply: AssistantMessage): boolean => {
   if (
     !reply.prefix ||
-    reply.stopReason === 'refusal' ||
     reply.stopReason === 'tool_use' ||
     reply.blocks.some(
       (block) =>
@@ -185,19 +178,17 @@ export const canContinueReply = (reply: AssistantMessage): boolean => {
     return false
   }
   return (
-    reply.status === 'stopped' ||
-    (reply.status === 'done' && reply.stopReason === 'max_tokens')
+    reply.status === 'stopped' || (reply.status === 'done' && reply.stopReason === 'max_tokens')
   )
 }
 
 /**
- * 已结束或停止且有回答文本的回复才放进上下文；被安全拒绝的轮次不回传。
+ * 已结束或停止且有回答文本的回复才放进上下文。
  * 服务端模板提示不进入上下文。
  */
 const isUsableReply = (message: Message): message is AssistantMessage =>
   message.role === 'assistant' &&
   (message.status === 'done' || message.status === 'stopped') &&
-  message.stopReason !== 'refusal' &&
   !message.blocks.some((block) => block.type === 'text' && block.isTemplate) &&
   getReplyText(message) !== ''
 

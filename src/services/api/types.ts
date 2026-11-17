@@ -184,6 +184,7 @@ export type CreateMessageRequest = {
 
 // ---------- 响应：流式事件 ----------
 
+/** refusal 只是服务端可能返回的结束原因取值，客户端按普通结束处理，不再做特殊拦截。 */
 export type StopReason = 'end_turn' | 'max_tokens' | 'tool_use' | 'refusal'
 
 export type StopDetails = { type: 'refusal'; category: null; explanation: null }

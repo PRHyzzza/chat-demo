@@ -31,10 +31,10 @@ chat_sessions/{session_id}_files/{file_id}_{file_name}  全部图片原件
 
 - 展示提问、正文、思考、附件，以及搜索、打开网页、页内查找步骤。搜索状态和查找词存在时用于展示；`READ_LINK` 有合法 URL 时展示链接与标题，仅含签名的记录用于请求上下文。展示链接仅接受 HTTP / HTTPS。
 - `TIP`、`CONTENT_RISK`、`PARTIAL_FILE_READ`、`TOOL_IMAGE_SEARCH` 等没有对应展示的内容直接丢弃，不显示占位或提示；工具分组等未映射到本地消息的元数据也不保留。完整转换规则见 [toLocal.ts](./toLocal.ts)。
-- `FINISHED` 转成已完成，`INCOMPLETE` / `WIP` 转成已停止，`FAILED` / `CONTEXT_LENGTH_EXCEEDED` / `TIMEOUT` 转成错误，`CONTENT_FILTER` 转成拒绝。思考与搜索开关保存在回复中。
-- 错误回复的模板文案显示为红字和感叹号提示，正文和思考独立展示。拒绝及其他非错误模板使用正文样式，拒绝回复丢弃普通正文和思考，可复制模板，不能重新生成。模板统一单独展示，不混入工具步骤前的说明文字。
+- `FINISHED` 转成已完成，`INCOMPLETE` / `WIP` 转成已停止，`FAILED` / `CONTEXT_LENGTH_EXCEEDED` / `TIMEOUT` 转成错误，`CONTENT_FILTER` 按已完成处理。思考与搜索开关保存在回复中。
+- 错误回复的模板文案显示为红字和感叹号提示，正文和思考独立展示。非错误模板使用正文样式。模板统一单独展示，不混入工具步骤前的说明文字。
 - 错误与模板回复保留在消息树中，其所在轮次不进入后续请求上下文。
-- 已完成或已停止、有正文、非拒绝且不含服务端模板的回复可以进入上下文。
+- 已完成或已停止、有正文且不含服务端模板的回复可以进入上下文。
 - 续写统一由本地消息的 `prefix` 与回复状态、内容决定：新生成的回复设置 `prefix: true`，导入的回复统一设置 `prefix: false`，不能继续生成。模板回复与含工具块的回复也不能续写。`prefix` 不发送到 API；只有允许续写的回复才会作为末尾 assistant 发送。
 - 请求从当前消息回传正文及 `READ_LINK` 工具块中的签名、URL 和标题，供服务端恢复网页上下文。历史思考和其他工具块不回传，见 [../reply.ts](../reply.ts)。
 

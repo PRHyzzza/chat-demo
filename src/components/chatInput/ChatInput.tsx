@@ -1,13 +1,17 @@
 import clsx from 'clsx'
 import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import {
+  IconCheckOutline16,
   IconGlobeLanguageOutline14,
   IconPaperclipOutline16,
+  IconPresetOutline16,
   IconSendOutline16,
+  IconSettingsOutline16,
   IconStopFill16,
   IconThinkOutline14,
 } from '../base/icons.js'
-import { setSearch, setThinking, useSettings } from '../../services/settings.js'
+import { presetLabel, useAllPresets } from '../../services/presets.js'
+import { selectPreset, setSearch, setThinking, useSettings } from '../../services/settings.js'
 import { useIsMobile } from '../../app/viewport.js'
 import { sendMessage, stopReply, useChatStore } from '../../services/chat/store.js'
 import {
@@ -22,8 +26,9 @@ import {
 } from '../../services/chat/drafts.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
 import { IconButton } from '../base/IconButton.js'
+import { Menu } from '../base/Menu.js'
 import { Tooltip } from '../base/Tooltip.js'
-import { ensureApiKey } from '../settings/settingsDialogState.js'
+import { ensureApiKey, openSettings } from '../settings/settingsDialogState.js'
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
 import { ACCEPT, useUploads } from '../../services/attachments.js'
@@ -50,6 +55,10 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     (state) => sessionId !== null && Object.hasOwn(state.streaming, sessionId)
   )
   const thinking = useSettings((state) => state.thinking)
+  const presetId = useSettings((state) => state.presetId)
+  const locale = useSettings((state) => state.locale)
+  const presets = useAllPresets()
+  const currentPreset = presets.find((preset) => preset.id === presetId)
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
@@ -200,8 +209,38 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         </div>
       </div>
       <div className={styles.functionRow}>
-        {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
+        {/* AI 预设 / 深度思考 / 智能搜索，tooltip 在按钮上方 */}
         <div ref={togglesRef} className={styles.toggles}>
+          <Menu
+            options={[
+              ...presets.map((preset) => ({
+                key: preset.id,
+                label: presetLabel(preset, locale),
+                icon: preset.id === presetId ? <IconCheckOutline16 /> : <IconPresetOutline16 />,
+                onSelect: () => selectPreset(preset.id),
+              })),
+              {
+                key: 'manage',
+                label: t('settingDialogAsidePresetOptionLabel'),
+                icon: <IconSettingsOutline16 />,
+                onSelect: () => openSettings('presets'),
+              },
+            ]}
+          >
+            {({ toggle }) => (
+              <button
+                type="button"
+                className={clsx(styles.toggle, styles.presetToggle)}
+                aria-label={t('presetSelectorTooltip')}
+                onClick={toggle}
+              >
+                <IconPresetOutline16 />
+                <span className={styles.toggleLabel}>
+                  {currentPreset ? presetLabel(currentPreset, locale) : t('presetSelectorTooltip')}
+                </span>
+              </button>
+            )}
+          </Menu>
           <Tooltip content={t('deactivatedThinkTooltip')}>
             <button
               type="button"

@@ -4,7 +4,6 @@ import type {
   ChatModel,
   MessageUsage,
   ServerToolBlock,
-  StopDetails,
   StopReason,
   TextCitation,
 } from '../api/types.js'
@@ -81,6 +80,8 @@ export type AssistantMessage = MessageBranch & {
   thinking?: boolean
   /** 请求时是否声明 deepseek_web_search；关闭时仍声明 deepseek_read_url */
   search?: boolean
+  /** 请求时使用的 AI 预设；缺省表示发送基础系统提示词。续写沿用。 */
+  presetId?: string
   /** 本轮请求的系统信息快照；各回答版本独立保存，续写沿用。历史消息中缺省的快照保持为空。 */
   latestReminder?: string
   /** 是否允许作为续写前缀；仍需满足回复状态与内容限制。 */
@@ -89,7 +90,6 @@ export type AssistantMessage = MessageBranch & {
   /** 可识别的内容块按接收顺序排列；续写产生的块追加在已有块之后 */
   blocks: ReplyBlock[]
   stopReason?: StopReason
-  stopDetails?: StopDetails
   /** 最近一次请求的用量，续写后更新 */
   usage?: MessageUsage
   error?: {

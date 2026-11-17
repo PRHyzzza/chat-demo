@@ -1,19 +1,21 @@
 import { create } from 'zustand'
 import type { TtsVoice } from './api/speech.js'
 import { normalizeLocation, type UserLocation } from './location.js'
+import { DEFAULT_PRESET_ID, findPreset } from './presets.js'
 
 export type Locale = 'zh-CN' | 'en-US'
 
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
+/** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、AI 预设、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
   apiKey: string | null
   locale: Locale
   themePreference: ThemePreference
   location: UserLocation | null
   ttsVoice: TtsVoice
+  presetId: string
   thinking: boolean
   search: boolean
   siderCollapsed: boolean
@@ -25,6 +27,7 @@ const KEYS = {
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
   ttsVoice: 'chat-demo:tts-voice',
+  presetId: 'chat-demo:preset',
   thinking: 'chat-demo:thinking',
   search: 'chat-demo:search',
   siderCollapsed: 'chat-demo:sider-collapsed',
@@ -87,12 +90,19 @@ const initialThemePreference = (): ThemePreference => {
 /** 未保存过时使用服务端默认音色 stella（海星） */
 const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide' : 'stella')
 
+/** 保存的预设可能已被删除，退回内置默认预设 */
+const initialPresetId = (): string => {
+  const saved = read(KEYS.presetId)
+  return findPreset(saved) ? (saved as string) : DEFAULT_PRESET_ID
+}
+
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
   locale: initialLocale(),
   location: initialLocation(),
   themePreference: initialThemePreference(),
   ttsVoice: initialTtsVoice(),
+  presetId: initialPresetId(),
   thinking: read(KEYS.thinking) === 'true',
   search: read(KEYS.search) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
@@ -122,6 +132,22 @@ export const setTtsVoice = (ttsVoice: TtsVoice) => {
 export const setApiKey = (apiKey: string | null) => {
   write(KEYS.apiKey, apiKey)
   useSettings.setState({ apiKey })
+}
+
+export const setPresetId = (presetId: string) => {
+  write(KEYS.presetId, presetId)
+  useSettings.setState({ presetId })
+}
+
+/** 切换预设时一并套用它的深度思考与智能搜索开关 */
+export const selectPreset = (presetId: string) => {
+  setPresetId(presetId)
+  const preset = findPreset(presetId)
+  if (!preset) {
+    return
+  }
+  setThinking(preset.thinking)
+  setSearch(preset.search)
 }
 
 export const setThinking = (thinking: boolean) => {

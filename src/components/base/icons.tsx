@@ -523,3 +523,10 @@ export const IconToastError16 = () => (
     />
   </svg>
 )
+
+/** AI 预设图标：四角星，颜色跟随 currentColor */
+export const IconPresetOutline16 = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M8 1.2 9.6 6.4 14.8 8 9.6 9.6 8 14.8 6.4 9.6 1.2 8 6.4 6.4Z" fill="currentColor" />
+  </svg>
+)

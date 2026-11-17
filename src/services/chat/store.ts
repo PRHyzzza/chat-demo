@@ -4,6 +4,7 @@ import { ApiError, streamMessage } from '../api/client.js'
 import type { ChatModel, CreateMessageRequest } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
+import { resolveSystemPrompt } from '../presets.js'
 import { useSettings } from '../settings.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
@@ -34,8 +35,6 @@ import {
 
 /** deepseek-flash 同时支持深度思考与图片输入 */
 const MODEL: ChatModel = 'deepseek-flash'
-/** 所有生成请求统一携带的助手身份说明 */
-const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
 /** 安全审核固定开启，所有请求都走扩展模式 */
@@ -253,9 +252,9 @@ export const bindChatPersistence = () => {
   }
 }
 
-/** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
+/** 按当前开关与预设创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search，预设决定 system。 */
 const createReply = (): AssistantMessage => {
-  const { thinking, search } = useSettings.getState()
+  const { thinking, search, presetId } = useSettings.getState()
   return {
     id: createId(),
     role: 'assistant',
@@ -263,6 +262,7 @@ const createReply = (): AssistantMessage => {
     model: MODEL,
     thinking,
     search,
+    presetId,
     prefix: true,
     status: 'pending',
     blocks: [],
@@ -705,16 +705,16 @@ export const continueReply = (sessionId: string, messageId: string) => {
   ) {
     return
   }
-  const { thinking, search } = useSettings.getState()
+  const { thinking, search, presetId } = useSettings.getState()
   const reply: AssistantMessage = {
     ...previous,
-    // 未记录请求配置的回复，续写时使用默认模型和当前开关。
+    // 未记录请求配置的回复，续写时使用默认模型、当前开关与当前预设。
     model: previous.model ?? MODEL,
     thinking: previous.thinking ?? thinking,
     search: previous.search ?? search,
+    presetId: previous.presetId ?? presetId,
     status: 'pending',
     stopReason: undefined,
-    stopDetails: undefined,
     error: undefined,
   }
   updateReply(sessionId, reply)
@@ -1000,7 +1000,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           useSettings.getState().apiKey ?? '',
           {
             model: initial.model ?? MODEL,
-            system: SYSTEM_PROMPT,
+            system: resolveSystemPrompt(initial.presetId),
             messages,
             thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
             safety_check: SAFETY_CHECK,
