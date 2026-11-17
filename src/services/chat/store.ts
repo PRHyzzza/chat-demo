@@ -58,6 +58,39 @@ const serverTools = (search: boolean): CreateMessageRequest['tools'] => {
 /** 允许自动补标题的请求；手动重命名后取消本轮标题写入，包含主动清空标题的情况。 */
 const titleRequests = new Set<AbortController>()
 
+/**
+ * 已经请求过服务端标题的会话：整轮会话只发一次，避免每轮都让服务端多生成一次标题。
+ * 标题一旦生成，列表里就有名字，后续请求不再携带 title。
+ */
+const titleRequestedSessions = new Set<string>()
+
+/** 标题由本地兜底生成的会话；服务端后续给出标题时仍然替换，手动重命名后不再替换。 */
+const autoTitledSessions = new Set<string>()
+
+/** 本地兜底标题的最大字数，超出部分截断，列表本身还有省略号。 */
+const AUTO_TITLE_LENGTH = 24
+
+/**
+ * 服务端没有返回标题时的兜底：取当前分支首条提问的第一行，压平空白后截断。
+ * 只有附件没有文字时用首个附件名。
+ */
+const deriveTitle = (session: Session): string => {
+  const question = getVisibleMessages(session).find((message) => message.role === 'user')
+  if (question?.role !== 'user') {
+    return ''
+  }
+  const line = question.content.replace(/\s+/g, ' ').trim()
+  const source = line || question.files[0]?.name.trim() || ''
+  if (!source) {
+    return ''
+  }
+  const chars = [...source]
+  const title =
+    chars.length > AUTO_TITLE_LENGTH ? chars.slice(0, AUTO_TITLE_LENGTH).join('') : source
+  // 截断点常落在标点上，去掉尾部残留的标点与空白，避免标题以逗号结尾。
+  return title.trim().replace(/[\s,，。、；;：:!！?？]+$/, '')
+}
+
 type ChatState = {
   ready: boolean
   initError: boolean
@@ -344,8 +377,15 @@ const ensureSessionLoaded = (id: string): Promise<void> => {
         throw new Error(`Session ${id} is missing from local storage`)
       }
       const settled = settleInterrupted(normalizeSession(stored))
+      // 打开没有标题的历史会话时顺手补一个，之后服务端给标题仍可替换。
+      const titled = settled.title ? settled : { ...settled, title: deriveTitle(settled) }
+      if (!settled.title && titled.title) {
+        autoTitledSessions.add(id)
+      }
       // 读取期间可能已在列表重命名，保留最新元数据，不能让旧读取覆盖它。
-      const session = sameSummary(settled, summary) ? settled : { ...settled, ...summary }
+      const session = sameSummary(titled, summary)
+        ? titled
+        : { ...titled, ...summary, title: summary.title || titled.title }
       touchSession(id)
       set((state) => ({ sessionCache: { ...state.sessionCache, [id]: session } }))
       if (session !== stored) {
@@ -416,6 +456,8 @@ export const replaceHistory = async (write: () => Promise<void>): Promise<number
     sessionAccess.clear()
     unsavedSessions.clear()
     pendingFiles.clear()
+    autoTitledSessions.clear()
+    titleRequestedSessions.clear()
     clearAllDrafts()
     set({
       ready: true,
@@ -464,6 +506,8 @@ export const renameSession = (id: string, title: string) => {
   if (controller) {
     titleRequests.delete(controller)
   }
+  // 手动命名优先，之后即使服务端补标题也不覆盖。
+  autoTitledSessions.delete(id)
   if (getSession(id)) {
     updateSession(id, (session) => ({ ...session, title }))
     persist(id)
@@ -508,6 +552,8 @@ const removeSessionData = async (id: string): Promise<boolean> => {
     sessionAccess.delete(id)
     unsavedSessions.delete(id)
     pendingFiles.delete(id)
+    autoTitledSessions.delete(id)
+    titleRequestedSessions.delete(id)
     clearDraft(id)
     set((state) => ({
       sessions: state.sessions.filter((session) => session.id !== id),
@@ -961,7 +1007,9 @@ const waitForRetry = (attempt: number, signal: AbortSignal) =>
  */
 const streamReply = async (sessionId: string, initial: AssistantMessage, request: Request) => {
   const controller = new AbortController()
-  if (!getSession(sessionId)?.title) {
+  // 一个会话只让服务端生成一次标题：标题要么来自服务端、要么来自本地兜底，
+  // 之后每一轮都不再带 title，避免反复消耗标题生成的额度。
+  if (!getSession(sessionId)?.title && !titleRequestedSessions.has(sessionId)) {
     titleRequests.add(controller)
   }
   set((state) => ({ streaming: { ...state.streaming, [sessionId]: controller } }))
@@ -996,6 +1044,10 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           initial.thinking ?? false,
           latestReminder
         )
+        // 真正要发请求时才锁定这一轮的标题生成机会；此前失败（如补传附件失败）不计入。
+        if (titleRequests.has(controller)) {
+          titleRequestedSessions.add(sessionId)
+        }
         const events = streamMessage(
           useSettings.getState().apiKey ?? '',
           {
@@ -1021,7 +1073,11 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             !get().importingHistory
           ) {
             const title = event.delta.title.trim()
-            updateSession(sessionId, (session) => (session.title ? session : { ...session, title }))
+            // 本地兜底生成的标题可以被服务端标题替换，手动重命名过的不会被覆盖。
+            updateSession(sessionId, (session) =>
+              session.title && !autoTitledSessions.has(sessionId) ? session : { ...session, title }
+            )
+            autoTitledSessions.delete(sessionId)
             titleRequests.delete(controller)
           }
           reply = applyEvent(reply, event, Date.now(), blockIndexes)
@@ -1083,6 +1139,15 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
     titleRequests.delete(controller)
     streamFlushes.delete(sessionId)
     cancelAnimationFrame(frame)
+    // 服务端没给标题时用首条提问兜底，避免会话一直显示「新对话」。
+    const titled = getSession(sessionId)
+    if (titled && !titled.title) {
+      const title = deriveTitle(titled)
+      if (title) {
+        autoTitledSessions.add(sessionId)
+        updateSession(sessionId, (session) => (session.title ? session : { ...session, title }))
+      }
+    }
     updateReply(sessionId, reply)
     set((state) => ({
       streaming: Object.fromEntries(
